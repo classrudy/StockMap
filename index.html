@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>互動式股票產業地圖</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4d;
+      --primary: #3b82f6;
+      --primary-hover: #60a5fa;
+      --accent: #22c55e;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --oval-stroke: #475569;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: 'Noto Sans TC', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+    .toolbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 52px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 12px;
+      z-index: 100;
+    }
+    .toolbar h1 {
+      margin: 0;
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .btn {
+      padding: 8px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.9rem;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .btn:hover {
+      background: var(--border);
+      border-color: var(--primary);
+    }
+    .btn-primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+    }
+    .tabs {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: 12px;
+    }
+    .tab {
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+    .tab:hover { border-color: var(--primary); color: var(--primary-hover); }
+    .tab.active {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #fff;
+    }
+    .toolbar-divider {
+      width: 1px;
+      height: 24px;
+      background: var(--border);
+      margin: 0 8px;
+      flex-shrink: 0;
+    }
+    .linking-hint {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-left: 8px;
+    }
+    .map-container {
+      position: fixed;
+      top: 52px;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      overflow: auto;
+    }
+    .map-inner {
+      position: relative;
+      min-width: 100%;
+      min-height: 100%;
+      padding: 24px;
+    }
+    /* 圖層由下到上：關聯線(0) / 股票(1) / 產業(2) */
+    svg.connections {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 0;
+    }
+    svg.connections .connection-lines { pointer-events: none; }
+    svg.connections .connection-group { pointer-events: none; }
+    svg.connections-hit {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 3;
+      pointer-events: none;
+    }
+    svg.connections-hit .connection-group { pointer-events: auto; cursor: pointer; }
+    .connection-line {
+      stroke: var(--oval-stroke);
+      stroke-width: 2;
+      transition: stroke 0.15s, stroke-width 0.15s;
+    }
+    .connection-group:hover .connection-line { stroke: var(--primary); stroke-width: 4; }
+    .connection-line-hit { stroke: transparent; stroke-width: 14; }
+    .connection-group { cursor: pointer; }
+    .nodes {
+      position: relative;
+      z-index: 1;
+      width: 3000px;
+      min-height: 2000px;
+      padding: 20px;
+    }
+    .industry-block {
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .industry-oval {
+      position: relative;
+      z-index: 2;
+      border: 2px solid var(--oval-stroke);
+      border-radius: 50%;
+      padding: 14px 24px;
+      min-width: 100px;
+      text-align: center;
+      background: var(--surface);
+      cursor: grab;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .industry-oval:active { cursor: grabbing; }
+    .industry-oval:hover,
+    .industry-oval.selected {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
+      outline: 1px solid var(--primary);
+      outline-offset: 2px;
+    }
+    .industry-oval .name { font-weight: 500; }
+    .industry-oval .edit-name {
+      width: 100%;
+      max-width: 140px;
+      background: var(--bg);
+      border: 1px solid var(--primary);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 4px 8px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      text-align: center;
+    }
+    .industry-connector {
+      position: relative;
+      z-index: 1;
+      width: 2px;
+      height: 16px;
+      background: var(--border);
+      margin: 0 auto;
+    }
+    .stocks-box {
+      position: relative;
+      z-index: 1;
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      border-radius: 10px;
+      background: rgba(26, 35, 50, 0.9);
+      min-width: 200px;
+      max-width: 280px;
+      padding: 10px 12px;
+      margin-top: 4px;
+      transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .stocks-box:hover {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 1px var(--primary);
+    }
+    .stocks-box .label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .stock-item {
+      display: flex;
+      align-items: center;
+      padding: 4px 6px;
+      font-size: 0.85rem;
+      color: #7dd3fc;
+      gap: 6px;
+    }
+    .stock-item { border-radius: 4px; transition: box-shadow 0.15s, outline 0.15s; }
+    .stock-item:hover { box-shadow: 0 0 0 1px var(--primary); outline: 1px solid rgba(59, 130, 246, 0.4); outline-offset: 0; }
+    .stock-item .code { min-width: 3em; }
+    .stock-item .changes {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      font-size: 0.75rem;
+      gap: 2px;
+    }
+    .stock-item .changes .sep { color: var(--text-muted); margin: 0 1px; }
+    .stock-item .change-up { color: #22c55e; }
+    .stock-item .change-down { color: #f87171; }
+    body.swap-fluctuation-colors .stock-item .change-up { color: #f87171; }
+    body.swap-fluctuation-colors .stock-item .change-down { color: #22c55e; }
+    .stock-item .change-loading { color: var(--text-muted); }
+    .stock-item .retry-quote {
+      cursor: pointer;
+      padding: 0 2px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+    .stock-item .retry-quote:hover { color: var(--primary); }
+    .stock-item .stock-daily.realtime {
+      background: rgba(148, 163, 184, 0.25);
+      padding: 1px 4px;
+      border-radius: 4px;
+    }
+    .stock-item .remove-stock {
+      opacity: 0.5;
+      cursor: pointer;
+      padding: 0 4px;
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .stock-item .remove-stock:hover { opacity: 1; color: #f87171; }
+    .add-stock-row {
+      margin-top: 6px;
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .add-stock-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 10px;
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+    .add-stock-row input::placeholder { color: var(--text-muted); }
+    .add-stock-row .btn { padding: 6px 10px; font-size: 0.8rem; }
+    .menu-popover {
+      position: fixed;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 0;
+      min-width: 180px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+      z-index: 200;
+    }
+    .menu-popover button {
+      display: block;
+      width: 100%;
+      padding: 10px 16px;
+      border: none;
+      background: none;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.9rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .menu-popover button:hover { background: var(--border); }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 150;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      min-width: 280px;
+    }
+    .modal h3 { margin: 0 0 12px 0; font-size: 1rem; }
+    .modal input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.95rem;
+      margin-bottom: 16px;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .empty-state {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: var(--text-muted);
+    }
+    .empty-state p { margin: 0 0 16px 0; }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <h1>互動式股票產業地圖</h1>
+    <div class="tabs" id="tabs">
+      <!-- tabs rendered by JS -->
+    </div>
+    <span class="toolbar-divider" aria-hidden="true"></span>
+    <button type="button" class="btn" id="newMapBtn">+ 新地圖</button>
+    <button type="button" class="btn" id="deleteMapBtn">刪除地圖</button>
+    <button type="button" class="btn btn-primary" id="createRoot">創立產業</button>
+    <button type="button" class="btn btn-primary" id="swapColorsBtn">交換漲跌顏色</button>
+    <span id="linkingHint" class="linking-hint" style="display:none"></span>
+  </div>
+  <div class="map-container">
+    <div class="map-inner">
+      <svg class="connections" id="connections"></svg>
+      <div class="nodes" id="nodes"></div>
+      <svg class="connections connections-hit" id="connectionsHit"></svg>
+      <div class="empty-state" id="emptyState">
+        <p>尚無產業。點擊「創立根產業」開始建立地圖。</p>
+      </div>
+    </div>
+  </div>
+  <div class="menu-popover" id="lineMenuPopover" style="display:none">
+    <button type="button" id="lineMenuDelete">刪除此關聯</button>
+  </div>
+  <div class="menu-popover" id="menuPopover" style="display:none">
+    <button type="button" data-action="add-related">新增相關產業（可多個）</button>
+    <button type="button" data-action="link-manual">手動新增關聯</button>
+    <button type="button" data-action="add-stock">在此產業下新增股票</button>
+    <button type="button" data-action="rename">重新命名產業</button>
+    <button type="button" data-action="delete">刪除此產業</button>
+  </div>
+  <div class="modal-backdrop" id="modalBackdrop" style="display:none">
+    <div class="modal" id="modal">
+      <h3 id="modalTitle">標題</h3>
+      <input type="text" id="modalInput" placeholder="輸入內容" />
+      <div class="modal-actions">
+        <button type="button" class="btn" id="modalCancel">取消</button>
+        <button type="button" class="btn btn-primary" id="modalOk">確定</button>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
