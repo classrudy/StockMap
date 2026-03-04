@@ -6,3 +6,6 @@
 - **儲存**：資料自動存於瀏覽器 localStorage，下次開啟可繼續編輯。
 
 直接以瀏覽器開啟 `index.html` 即可使用。
+<img width="1369" height="895" alt="image" src="https://github.com/user-attachments/assets/55ca5665-8052-4071-997f-62025195e283" />
+
+
