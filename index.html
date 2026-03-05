@@ -273,7 +273,8 @@
     .stock-item[draggable="true"] { cursor: grab; }
     .stock-item.stock-dragging { opacity: 0.6; cursor: grabbing; }
     .stock-item.stock-drop-target { outline: 1px dashed var(--primary); outline-offset: 2px; }
-    .stock-item .code { min-width: 3em; }
+    .stock-item .code { min-width: 3em; color: inherit; text-decoration: none; cursor: pointer; }
+    .stock-item .code:hover { text-decoration: underline; color: var(--primary); }
     .stock-item .stock-type-label { color: var(--text-muted); font-size: 0.7em; margin-left: 2px; }
     .stock-item .changes {
       display: flex;

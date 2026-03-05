@@ -677,9 +677,11 @@ function render() {
       row.dataset.code = code;
       row.dataset.stockIndex = String(fromIndex);
       row.draggable = true;
-      row.innerHTML = `<span class="code">${escapeHtml(code)}</span><span class="stock-type-label"></span><span class="changes"><span class="stock-daily change-loading">…</span><span class="sep">/</span><span class="stock-ytd change-loading">…</span></span><span class="retry-quote" title="重試取得漲跌幅">↻</span><span class="remove-stock" title="移除">×</span>`;
+      const yahooSymbol = toYahooSymbol(code);
+      const yahooQuoteUrl = 'https://finance.yahoo.com/quote/' + encodeURIComponent(yahooSymbol) + '/';
+      row.innerHTML = `<a class="code" href="${escapeHtml(yahooQuoteUrl)}" target="_blank" rel="noopener noreferrer" title="在 Yahoo Finance 開啟">${escapeHtml(code)}</a><span class="stock-type-label"></span><span class="changes"><span class="stock-daily change-loading">…</span><span class="sep">/</span><span class="stock-ytd change-loading">…</span></span><span class="retry-quote" title="重試取得漲跌幅">↻</span><span class="remove-stock" title="移除">×</span>`;
       row.addEventListener('dragstart', e => {
-        if (e.target.closest('.remove-stock, .retry-quote')) {
+        if (e.target.closest('.remove-stock, .retry-quote, .code')) {
           e.preventDefault();
           return;
         }
