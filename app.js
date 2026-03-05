@@ -89,7 +89,8 @@ function fetchStockQuote(code) {
     return Promise.resolve({
       dailyPct: cached.dailyPct,
       ytdPct: cached.ytdPct,
-      isRealtime: !!cached.isRealtime
+      isRealtime: !!cached.isRealtime,
+      quoteType: cached.quoteType
     });
   }
   const yahooUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(symbol) + '?interval=1d&range=1y';
@@ -158,9 +159,10 @@ function fetchStockQuote(code) {
         }
         if (firstClose != null && firstClose !== 0) ytdPct = ((lastClose - firstClose) / firstClose) * 100;
       }
-    quoteCache[symbol] = { dailyPct: dailyPctOut, ytdPct, isRealtime, t: now };
+      const quoteType = (meta.quoteType || meta.instrumentType || '').toUpperCase();
+    quoteCache[symbol] = { dailyPct: dailyPctOut, ytdPct, isRealtime, quoteType, t: now };
     saveQuoteCache();
-    return { dailyPct: dailyPctOut, ytdPct, isRealtime };
+    return { dailyPct: dailyPctOut, ytdPct, isRealtime, quoteType };
   }).catch(() => null);
 }
 
@@ -169,14 +171,19 @@ function updateStockRowChanges(row, data) {
   const ytdEl = row.querySelector('.stock-ytd');
   if (!dailyEl || !ytdEl) return;
   if (data == null) {
+    const typeLabel = row.querySelector('.stock-type-label');
+    if (typeLabel) typeLabel.textContent = '';
     dailyEl.textContent = '—';
     ytdEl.textContent = '—';
     dailyEl.className = 'stock-daily change-loading';
     ytdEl.className = 'stock-ytd change-loading';
     return;
   }
+  const typeLabel = row.querySelector('.stock-type-label');
+  if (typeLabel) typeLabel.textContent = (data.quoteType === 'ETF' ? ' ETF' : '');
   dailyEl.textContent = formatPct(data.dailyPct);
-  dailyEl.className = 'stock-daily ' + (data.dailyPct >= 0 ? 'change-up' : 'change-down') + (data.isRealtime ? ' realtime' : '');
+  const dailyClass = Math.abs(data.dailyPct) < 0.005 ? 'change-flat' : (data.dailyPct >= 0 ? 'change-up' : 'change-down');
+  dailyEl.className = 'stock-daily ' + dailyClass + (data.isRealtime ? ' realtime' : '');
   ytdEl.textContent = formatPct(data.ytdPct);
   ytdEl.className = 'stock-ytd ' + (data.ytdPct != null ? (data.ytdPct >= 0 ? 'change-up' : 'change-down') : 'change-loading');
 }
@@ -609,11 +616,52 @@ function render() {
     const stocksBox = document.createElement('div');
     stocksBox.className = 'stocks-box';
     stocksBox.innerHTML = '<div class="label">股票代碼</div>';
-    (ind.stocks || []).forEach(code => {
+    (ind.stocks || []).forEach((code, fromIndex) => {
       const row = document.createElement('div');
       row.className = 'stock-item';
       row.dataset.code = code;
-      row.innerHTML = `<span class="code">${escapeHtml(code)}</span><span class="changes"><span class="stock-daily change-loading">…</span><span class="sep">/</span><span class="stock-ytd change-loading">…</span></span><span class="retry-quote" title="重試取得漲跌幅">↻</span><span class="remove-stock" title="移除">×</span>`;
+      row.dataset.stockIndex = String(fromIndex);
+      row.draggable = true;
+      row.innerHTML = `<span class="code">${escapeHtml(code)}</span><span class="stock-type-label"></span><span class="changes"><span class="stock-daily change-loading">…</span><span class="sep">/</span><span class="stock-ytd change-loading">…</span></span><span class="retry-quote" title="重試取得漲跌幅">↻</span><span class="remove-stock" title="移除">×</span>`;
+      row.addEventListener('dragstart', e => {
+        if (e.target.closest('.remove-stock, .retry-quote')) {
+          e.preventDefault();
+          return;
+        }
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/json', JSON.stringify({ industryId: ind.id, fromIndex }));
+        row.classList.add('stock-dragging');
+      });
+      row.addEventListener('dragend', () => row.classList.remove('stock-dragging'));
+      row.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const targetRow = e.currentTarget;
+        if (targetRow.classList.contains('stock-dragging')) return;
+        targetRow.classList.add('stock-drop-target');
+      });
+      row.addEventListener('dragleave', e => {
+        e.currentTarget.classList.remove('stock-drop-target');
+      });
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        e.currentTarget.classList.remove('stock-drop-target');
+        const targetRow = e.currentTarget;
+        if (targetRow.classList.contains('stock-dragging')) return;
+        try {
+          const { industryId, fromIndex: srcIdx } = JSON.parse(e.dataTransfer.getData('application/json'));
+          if (industryId !== ind.id) return;
+          const toIndex = parseInt(targetRow.dataset.stockIndex, 10);
+          if (srcIdx === toIndex) return;
+          const stocks = (ind.stocks || []).slice();
+          const [removed] = stocks.splice(srcIdx, 1);
+          stocks.splice(toIndex, 0, removed);
+          ind.stocks = stocks;
+          saveState();
+          render();
+        } catch (_) {}
+      });
       row.querySelector('.remove-stock').addEventListener('click', e => {
         e.stopPropagation();
         removeStock(ind.id, code);

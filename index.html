@@ -236,7 +236,11 @@
     }
     .stock-item { border-radius: 4px; transition: box-shadow 0.15s, outline 0.15s; }
     .stock-item:hover { box-shadow: 0 0 0 1px var(--primary); outline: 1px solid rgba(59, 130, 246, 0.4); outline-offset: 0; }
+    .stock-item[draggable="true"] { cursor: grab; }
+    .stock-item.stock-dragging { opacity: 0.6; cursor: grabbing; }
+    .stock-item.stock-drop-target { outline: 1px dashed var(--primary); outline-offset: 2px; }
     .stock-item .code { min-width: 3em; }
+    .stock-item .stock-type-label { color: var(--text-muted); font-size: 0.7em; margin-left: 2px; }
     .stock-item .changes {
       display: flex;
       flex-direction: row;
