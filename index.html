@@ -106,6 +106,40 @@
       color: var(--text-muted);
       margin-left: 8px;
     }
+    .second-range-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 4px;
+    }
+    .second-range-label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .second-range-select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 10px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .second-range-select:hover { border-color: var(--primary); }
+    .second-range-date {
+      width: 100px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+    .second-range-date::placeholder { color: var(--text-muted); }
+    .second-range-date:focus { outline: none; border-color: var(--primary); }
     .map-container {
       position: fixed;
       top: 52px;
@@ -366,6 +400,15 @@
     <button type="button" class="btn" id="deleteMapBtn">刪除地圖</button>
     <button type="button" class="btn btn-primary" id="createRoot">創立產業</button>
     <button type="button" class="btn btn-primary" id="swapColorsBtn">交換漲跌顏色</button>
+    <span class="toolbar-divider" aria-hidden="true"></span>
+    <span class="second-range-wrap">
+      <label for="secondRangeMode" class="second-range-label">第二段漲跌幅：</label>
+      <select id="secondRangeMode" class="second-range-select" title="第二段漲跌幅計算方式">
+        <option value="ytd">YTD（年初至今）</option>
+        <option value="date">指定日期</option>
+      </select>
+      <input type="text" id="secondRangeDate" class="second-range-date" placeholder="YYYY/MM/DD" title="從此日收盤起算" style="display:none" />
+    </span>
     <span id="linkingHint" class="linking-hint" style="display:none"></span>
   </div>
   <div class="map-container">

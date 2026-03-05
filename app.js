@@ -1,5 +1,6 @@
 const STORAGE_KEY = 'stock-industry-map';
 const SWAP_COLORS_KEY = 'stock-industry-map-swapColors';
+const SECOND_RANGE_KEY = 'stock-industry-map-secondRange';
 const QUOTE_CACHE_KEY = 'stock-industry-map-quotes-v3';
 const QUOTE_CACHE_TTL_MS = 5 * 60 * 1000;
 const QUOTE_FETCH_TIMEOUT_MS = 15000;
@@ -55,6 +56,28 @@ function saveQuoteCache() {
   } catch (_) {}
 }
 
+function getSecondRangeSetting() {
+  try {
+    const raw = localStorage.getItem(SECOND_RANGE_KEY);
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && (o.mode === 'ytd' || o.mode === 'date')) {
+        return {
+          mode: o.mode,
+          date: (o.mode === 'date' && o.date) ? String(o.date).trim() : ''
+        };
+      }
+    }
+  } catch (_) {}
+  return { mode: 'ytd', date: '' };
+}
+
+function saveSecondRangeSetting(setting) {
+  try {
+    localStorage.setItem(SECOND_RANGE_KEY, JSON.stringify(setting));
+  } catch (_) {}
+}
+
 function isMarketOpen(symbol) {
   const d = new Date();
   const tz = (symbol.endsWith('.TW') || symbol.endsWith('.TWO')) ? 'Asia/Taipei' : 'America/New_York';
@@ -84,11 +107,16 @@ function isTimestampTodayInMarketTZ(tsSec, symbol) {
 function fetchStockQuote(code) {
   const symbol = toYahooSymbol(code);
   const now = Date.now();
+  const secondRange = getSecondRangeSetting();
   const cached = quoteCache[symbol];
-  if (cached && now - (cached.t || 0) < QUOTE_CACHE_TTL_MS && cached.dailyPct != null) {
+  const cacheValid = cached && now - (cached.t || 0) < QUOTE_CACHE_TTL_MS && cached.dailyPct != null;
+  const cacheHasSecond = secondRange.mode === 'ytd' ||
+    (secondRange.mode === 'date' && secondRange.date && cached?.customDate === secondRange.date);
+  if (cacheValid && cacheHasSecond) {
+    const secondPct = secondRange.mode === 'ytd' ? cached.ytdPct : cached.customPct;
     return Promise.resolve({
       dailyPct: cached.dailyPct,
-      ytdPct: cached.ytdPct,
+      secondPct,
       isRealtime: !!cached.isRealtime,
       quoteType: cached.quoteType
     });
@@ -145,6 +173,8 @@ function fetchStockQuote(code) {
         dailyPctOut = ((lastClose - prevClose) / prevClose) * 100;
       }
       let ytdPct = null;
+      let customPct = null;
+      let customDate = null;
       if (result.timestamp?.length) {
         const year = new Date().getFullYear();
         const firstOfYearSec = new Date(year, 0, 1).getTime() / 1000;
@@ -158,11 +188,36 @@ function fetchStockQuote(code) {
           }
         }
         if (firstClose != null && firstClose !== 0) ytdPct = ((lastClose - firstClose) / firstClose) * 100;
+        if (secondRange.mode === 'date' && secondRange.date) {
+          const parts = secondRange.date.replace(/-/g, '/').split('/');
+          if (parts.length >= 3) {
+            const y = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10) - 1;
+            const d = parseInt(parts[2], 10);
+            if (!Number.isNaN(y) && !Number.isNaN(m) && !Number.isNaN(d)) {
+              const fromSec = new Date(y, m, d).getTime() / 1000;
+              let fromClose = null;
+              for (let i = 0; i < result.timestamp.length; i++) {
+                const t = result.timestamp[i];
+                const c = quoteCloses[i];
+                if (t != null && c != null && !Number.isNaN(c) && t >= fromSec) {
+                  fromClose = c;
+                  break;
+                }
+              }
+              if (fromClose != null && fromClose !== 0) {
+                customPct = ((lastClose - fromClose) / fromClose) * 100;
+                customDate = secondRange.date;
+              }
+            }
+          }
+        }
       }
       const quoteType = (meta.quoteType || meta.instrumentType || '').toUpperCase();
-    quoteCache[symbol] = { dailyPct: dailyPctOut, ytdPct, isRealtime, quoteType, t: now };
+      const secondPct = secondRange.mode === 'ytd' ? ytdPct : customPct;
+    quoteCache[symbol] = { dailyPct: dailyPctOut, ytdPct, customPct, customDate, isRealtime, quoteType, t: now };
     saveQuoteCache();
-    return { dailyPct: dailyPctOut, ytdPct, isRealtime, quoteType };
+    return { dailyPct: dailyPctOut, secondPct, isRealtime, quoteType };
   }).catch(() => null);
 }
 
@@ -184,8 +239,8 @@ function updateStockRowChanges(row, data) {
   dailyEl.textContent = formatPct(data.dailyPct);
   const dailyClass = Math.abs(data.dailyPct) < 0.005 ? 'change-flat' : (data.dailyPct >= 0 ? 'change-up' : 'change-down');
   dailyEl.className = 'stock-daily ' + dailyClass + (data.isRealtime ? ' realtime' : '');
-  ytdEl.textContent = formatPct(data.ytdPct);
-  ytdEl.className = 'stock-ytd ' + (data.ytdPct != null ? (data.ytdPct >= 0 ? 'change-up' : 'change-down') : 'change-loading');
+  ytdEl.textContent = formatPct(data.secondPct);
+  ytdEl.className = 'stock-ytd ' + (data.secondPct != null ? (data.secondPct >= 0 ? 'change-up' : 'change-down') : 'change-loading');
 }
 
 function ensurePositions() {
@@ -756,6 +811,33 @@ function init() {
       localStorage.setItem(SWAP_COLORS_KEY, document.body.classList.contains('swap-fluctuation-colors') ? '1' : '0');
     } catch (_) {}
   });
+
+  (function setupSecondRange() {
+    const modeEl = document.getElementById('secondRangeMode');
+    const dateEl = document.getElementById('secondRangeDate');
+    if (!modeEl || !dateEl) return;
+    const setting = getSecondRangeSetting();
+    modeEl.value = setting.mode;
+    dateEl.value = setting.date;
+    dateEl.style.display = setting.mode === 'date' ? '' : 'none';
+
+    function applyAndRefresh() {
+      const mode = modeEl.value;
+      const date = (dateEl.value || '').trim().replace(/-/g, '/');
+      saveSecondRangeSetting({ mode, date });
+      dateEl.style.display = mode === 'date' ? '' : 'none';
+      quoteCache = {};
+      saveQuoteCache();
+      render();
+    }
+
+    modeEl.addEventListener('change', applyAndRefresh);
+    dateEl.addEventListener('change', applyAndRefresh);
+    dateEl.addEventListener('blur', () => {
+      const date = (dateEl.value || '').trim().replace(/-/g, '/');
+      if (date && modeEl.value === 'date') applyAndRefresh();
+    });
+  })();
 
   document.getElementById('lineMenuDelete').addEventListener('click', () => {
     if (state.selectedLink) {
