@@ -300,6 +300,84 @@ function saveState() {
   }
 }
 
+function exportStateToFile() {
+  try {
+    const m = currentMap();
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      map: {
+        name: m.name,
+        industries: JSON.parse(JSON.stringify(m.industries || [])),
+        nextId: m.nextId || 1
+      }
+    };
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (m.name || '地圖') + '-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    console.warn('Export failed', e);
+    alert('匯出失敗：' + (e.message || String(e)));
+  }
+}
+
+function ensurePositionsForIndustries(industries) {
+  (industries || []).forEach((ind, index) => {
+    if (typeof ind.x !== 'number' || typeof ind.y !== 'number') {
+      ind.x = DEFAULT_X + (index % 4) * 220;
+      ind.y = DEFAULT_Y + Math.floor(index / 4) * 180;
+    }
+  });
+}
+
+function importStateFromFile(file) {
+  if (!file || !file.name) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      let mapData = null;
+      if (data && data.map && Array.isArray(data.map.industries)) {
+        mapData = data.map;
+      } else if (data && Array.isArray(data.maps) && data.maps.length) {
+        mapData = data.maps[0];
+      }
+      if (!mapData || !Array.isArray(mapData.industries)) {
+        alert('無效的設定檔：需包含地圖 (map 或 maps)。');
+        return;
+      }
+      const industries = JSON.parse(JSON.stringify(mapData.industries));
+      const name = (mapData.name && String(mapData.name).trim()) || '載入的地圖';
+      ensurePositionsForIndustries(industries);
+      const usedIds = state.maps.map(m => m.id);
+      let n = 1;
+      while (usedIds.includes('m' + n)) n++;
+      const newId = 'm' + n;
+      const newMap = {
+        id: newId,
+        name,
+        industries,
+        nextId: mapData.nextId || 1
+      };
+      state.maps.push(newMap);
+      state.activeMapId = newId;
+      saveState();
+      renderTabs();
+      render();
+      document.getElementById('emptyState').style.display = currentMap().industries.length ? 'none' : 'block';
+    } catch (e) {
+      console.warn('Import failed', e);
+      alert('載入失敗：' + (e.message || String(e)));
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
 function renderTabs() {
   const container = document.getElementById('tabs');
   if (!container) return;
@@ -310,6 +388,7 @@ function renderTabs() {
     tab.className = 'tab' + (m.id === state.activeMapId ? ' active' : '');
     tab.textContent = m.name;
     tab.dataset.mapId = m.id;
+    tab.draggable = true;
     tab.addEventListener('click', () => switchMap(m.id));
     tab.addEventListener('dblclick', e => {
       e.stopPropagation();
@@ -319,6 +398,31 @@ function renderTabs() {
         saveState();
         renderTabs();
       }
+    });
+    tab.addEventListener('dragstart', e => {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', m.id);
+      tab.classList.add('tab-dragging');
+    });
+    tab.addEventListener('dragend', () => tab.classList.remove('tab-dragging'));
+    tab.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (!tab.classList.contains('tab-dragging')) tab.classList.add('tab-drop-target');
+    });
+    tab.addEventListener('dragleave', () => tab.classList.remove('tab-drop-target'));
+    tab.addEventListener('drop', e => {
+      e.preventDefault();
+      tab.classList.remove('tab-drop-target');
+      const draggedId = e.dataTransfer.getData('text/plain');
+      if (!draggedId || draggedId === m.id) return;
+      const fromIndex = state.maps.findIndex(mp => mp.id === draggedId);
+      const toIndex = state.maps.findIndex(mp => mp.id === m.id);
+      if (fromIndex === -1 || toIndex === -1) return;
+      const [removed] = state.maps.splice(fromIndex, 1);
+      state.maps.splice(toIndex, 0, removed);
+      saveState();
+      renderTabs();
     });
     container.appendChild(tab);
   });
@@ -803,6 +907,13 @@ function init() {
   document.getElementById('createRoot').addEventListener('click', createRootIndustry);
   document.getElementById('newMapBtn').addEventListener('click', addNewMap);
   document.getElementById('deleteMapBtn').addEventListener('click', deleteCurrentMap);
+  document.getElementById('exportBtn').addEventListener('click', exportStateToFile);
+  document.getElementById('importBtn').addEventListener('click', () => document.getElementById('importFileInput').click());
+  document.getElementById('importFileInput').addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (file) importStateFromFile(file);
+    e.target.value = '';
+  });
 
   try {
     if (localStorage.getItem(SWAP_COLORS_KEY) === '1') document.body.classList.add('swap-fluctuation-colors');

@@ -94,6 +94,9 @@
       border-color: var(--primary);
       color: #fff;
     }
+    .tab[draggable="true"] { cursor: grab; }
+    .tab.tab-dragging { opacity: 0.6; cursor: grabbing; }
+    .tab.tab-drop-target { box-shadow: 0 0 0 2px var(--primary); border-color: var(--primary); }
     .toolbar-divider {
       width: 1px;
       height: 24px;
@@ -399,6 +402,10 @@
     <span class="toolbar-divider" aria-hidden="true"></span>
     <button type="button" class="btn" id="newMapBtn">+ 新地圖</button>
     <button type="button" class="btn" id="deleteMapBtn">刪除地圖</button>
+    <span class="toolbar-divider" aria-hidden="true"></span>
+    <button type="button" class="btn" id="exportBtn">另存設定</button>
+    <button type="button" class="btn" id="importBtn">載入設定</button>
+    <input type="file" id="importFileInput" accept=".json,application/json" style="display:none" />
     <button type="button" class="btn btn-primary" id="createRoot">創立產業</button>
     <button type="button" class="btn btn-primary" id="swapColorsBtn">交換漲跌顏色</button>
     <span class="toolbar-divider" aria-hidden="true"></span>
