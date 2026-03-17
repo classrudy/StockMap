@@ -3,8 +3,48 @@ const SWAP_COLORS_KEY = 'stock-industry-map-swapColors';
 const SECOND_RANGE_KEY = 'stock-industry-map-secondRange';
 const QUOTE_CACHE_KEY = 'stock-industry-map-quotes-v3';
 const QUOTE_CACHE_TTL_MS = 5 * 60 * 1000;
-const QUOTE_FETCH_TIMEOUT_MS = 15000;
+const QUOTE_FETCH_TIMEOUT_MS = 22000;
+const MAX_CONCURRENT_QUOTE_FETCHES = 3;
 const DEFAULT_X = 80;
+const MAX_DEBUG_ENTRIES = 150;
+const DEBUG_PROXY_NAMES = ['allorigins.win', 'cors.lol', 'render', 'corsproxy.io'];
+
+const debugLog = [];
+function debugLogAdd(symbol, step, message, detail) {
+  const entry = {
+    time: new Date().toISOString(),
+    ts: Date.now(),
+    symbol: symbol || '',
+    step,
+    message,
+    detail: detail != null ? detail : undefined
+  };
+  debugLog.push(entry);
+  if (debugLog.length > MAX_DEBUG_ENTRIES) debugLog.splice(0, debugLog.length - MAX_DEBUG_ENTRIES);
+}
+function getDebugLog() { return debugLog.slice(); }
+function clearDebugLog() { debugLog.length = 0; }
+
+let quoteFetchConcurrent = 0;
+const quoteFetchQueue = [];
+function acquireQuoteFetchSlot() {
+  return new Promise(resolve => {
+    if (quoteFetchConcurrent < MAX_CONCURRENT_QUOTE_FETCHES) {
+      quoteFetchConcurrent++;
+      resolve();
+    } else {
+      quoteFetchQueue.push(resolve);
+    }
+  });
+}
+function releaseQuoteFetchSlot() {
+  quoteFetchConcurrent--;
+  if (quoteFetchQueue.length) {
+    quoteFetchConcurrent++;
+    quoteFetchQueue.shift()();
+  }
+}
+
 const DEFAULT_Y = 80;
 const DRAG_THRESHOLD = 5;
 
@@ -114,6 +154,7 @@ function fetchStockQuote(code) {
     (secondRange.mode === 'date' && secondRange.date && cached?.customDate === secondRange.date);
   if (cacheValid && cacheHasSecond) {
     const secondPct = secondRange.mode === 'ytd' ? cached.ytdPct : cached.customPct;
+    debugLogAdd(symbol, 'cache_hit', '使用快取', { dailyPct: cached.dailyPct, secondPct });
     return Promise.resolve({
       dailyPct: cached.dailyPct,
       secondPct,
@@ -121,47 +162,91 @@ function fetchStockQuote(code) {
       quoteType: cached.quoteType
     });
   }
+  debugLogAdd(symbol, 'fetch_start', cacheValid ? '快取缺少第二段' : '快取過期或無，開始請求');
   const yahooUrl = 'https://query1.finance.yahoo.com/v8/finance/chart/' + encodeURIComponent(symbol) + '?interval=1d&range=1y';
+  const isLocalhost = typeof location !== 'undefined' && (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
   const proxies = [
     'https://api.allorigins.win/raw?url=' + encodeURIComponent(yahooUrl),
-    'https://corsproxy.io/?' + encodeURIComponent(yahooUrl),
-    'https://api.cors.lol/?' + encodeURIComponent(yahooUrl)
+    'https://api.cors.lol/?' + encodeURIComponent(yahooUrl),
+    'https://corsproxy-8uo5.onrender.com/?' + encodeURIComponent(yahooUrl)
   ];
+  if (isLocalhost) proxies.push('https://corsproxy.io/?' + encodeURIComponent(yahooUrl));
   const fetchWithTimeout = (url, ms) => {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), ms);
     return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(t));
   };
   function tryNext(i) {
-    if (i >= proxies.length) return Promise.resolve(null);
+    if (i >= proxies.length) {
+      debugLogAdd(symbol, 'proxy_fail', '所有代理皆失敗');
+      return Promise.resolve(null);
+    }
+    const proxyName = DEBUG_PROXY_NAMES[i] || 'proxy#' + i;
+    debugLogAdd(symbol, 'proxy_try', '嘗試代理: ' + proxyName);
     return fetchWithTimeout(proxies[i], QUOTE_FETCH_TIMEOUT_MS)
       .then(r => {
         const ct = (r.headers.get('content-type') || '').toLowerCase();
-        if (!ct.includes('application/json')) throw new Error('Not JSON');
+        if (!ct.includes('application/json')) throw new Error('Not JSON (Content-Type: ' + (ct || 'empty') + ')');
         return r.json();
       })
       .then(data => {
         const result = data.chart?.result?.[0];
-        if (!result) throw new Error('No result');
+        if (!result) {
+          const apiErr = data.error || data.chart?.error;
+          const errStr = apiErr && typeof apiErr === 'object'
+            ? (apiErr.description || apiErr.message || apiErr.code || JSON.stringify(apiErr).slice(0, 200))
+            : (apiErr || '');
+          if (errStr) debugLogAdd(symbol, 'api_error', 'Yahoo/代理回傳', { error: errStr });
+          const hint = data.chart?.error?.description || (data.chart?.error ? 'chart.error' : (data.error ? 'top-level error' : 'result 為空'));
+          throw new Error('API 無 result (' + hint + ')');
+        }
         return data;
       })
-      .catch(() => tryNext(i + 1));
+      .then(data => {
+        debugLogAdd(symbol, 'proxy_ok', '代理成功: ' + proxyName);
+        return data;
+      })
+      .catch(err => {
+        debugLogAdd(symbol, 'proxy_fail', proxyName + ' 失敗', (err && err.message) || String(err));
+        return tryNext(i + 1);
+      });
   }
-  return tryNext(0).then(data => {
-    if (!data) return null;
+  return acquireQuoteFetchSlot()
+    .then(() => tryNext(0))
+    .then(data => {
+    if (!data) {
+      debugLogAdd(symbol, 'retry', '所有代理失敗，延遲 1 秒後重試一輪');
+      return new Promise(r => setTimeout(r, 1000)).then(() => tryNext(0));
+    }
+    return data;
+  })
+    .then(data => {
+    if (!data) {
+      debugLogAdd(symbol, 'result', '取得資料為 null（無法取得報價）');
+      return null;
+    }
     const result = data.chart?.result?.[0];
       const meta = result.meta || {};
       const quotes = result.indicators?.quote?.[0];
       const quoteCloses = quotes?.close;
-      if (!quoteCloses?.length) return null;
+      if (!quoteCloses?.length) {
+        debugLogAdd(symbol, 'parse', '解析失敗: 無收盤價陣列 (quoteCloses)', { hasQuotes: !!quotes });
+        return null;
+      }
       const validCloses = quoteCloses.filter(c => c != null && !Number.isNaN(c));
-      if (validCloses.length < 2) return null;
+      if (validCloses.length < 2) {
+        debugLogAdd(symbol, 'parse', '解析失敗: 有效收盤價不足 2 筆', { length: validCloses.length });
+        return null;
+      }
       const lastTs = result.timestamp != null && result.timestamp.length ? result.timestamp[result.timestamp.length - 1] : null;
       const lastClose = validCloses[validCloses.length - 1];
       const prevClose = validCloses[validCloses.length - 2];
       const lastBarIsToday = lastTs != null && isTimestampTodayInMarketTZ(lastTs, symbol);
       const previousTradingDayClose = lastBarIsToday ? prevClose : lastClose;
-      if (previousTradingDayClose === 0) return null;
+      if (previousTradingDayClose === 0) {
+        debugLogAdd(symbol, 'parse', '解析失敗: 前日收盤價為 0');
+        return null;
+      }
       const marketOpen = isMarketOpen(symbol);
       const currentPrice = meta.regularMarketPrice;
       let dailyPctOut;
@@ -217,8 +302,13 @@ function fetchStockQuote(code) {
       const secondPct = secondRange.mode === 'ytd' ? ytdPct : customPct;
     quoteCache[symbol] = { dailyPct: dailyPctOut, ytdPct, customPct, customDate, isRealtime, quoteType, t: now };
     saveQuoteCache();
+    debugLogAdd(symbol, 'ok', '漲跌幅計算成功', { dailyPct: dailyPctOut, secondPct, isRealtime });
     return { dailyPct: dailyPctOut, secondPct, isRealtime, quoteType };
-  }).catch(() => null);
+  }).catch(err => {
+    debugLogAdd(symbol, 'exception', '發生例外', (err && err.message) || String(err));
+    return null;
+  })
+    .finally(releaseQuoteFetchSlot);
 }
 
 function updateStockRowChanges(row, data) {
@@ -924,6 +1014,33 @@ function init() {
       localStorage.setItem(SWAP_COLORS_KEY, document.body.classList.contains('swap-fluctuation-colors') ? '1' : '0');
     } catch (_) {}
   });
+
+  (function setupDebugPanel() {
+    const panel = document.getElementById('debugPanel');
+    const btn = document.getElementById('debugWindowBtn');
+    const content = document.getElementById('debugLogContent');
+    const refreshBtn = document.getElementById('debugRefreshBtn');
+    const clearBtn = document.getElementById('debugClearBtn');
+    const closeBtn = document.getElementById('debugCloseBtn');
+    function refreshDebugLog() {
+      const entries = getDebugLog();
+      const lines = entries.map(e => {
+        const d = e.detail != null ? ' ' + JSON.stringify(e.detail) : '';
+        return `[${e.time}] [${e.symbol}] ${e.step}: ${e.message}${d}`;
+      });
+      if (content) content.textContent = lines.length ? lines.join('\n') : '(尚無紀錄，請重新整理頁面或重試漲跌幅後再開)';
+    }
+    if (btn && panel) {
+      btn.addEventListener('click', () => {
+        const show = panel.style.display !== 'block';
+        panel.style.display = show ? 'block' : 'none';
+        if (show) refreshDebugLog();
+      });
+    }
+    if (refreshBtn) refreshBtn.addEventListener('click', refreshDebugLog);
+    if (clearBtn) clearBtn.addEventListener('click', () => { clearDebugLog(); refreshDebugLog(); });
+    if (closeBtn && panel) closeBtn.addEventListener('click', () => { panel.style.display = 'none'; });
+  })();
 
   (function setupSecondRange() {
     const modeEl = document.getElementById('secondRangeMode');

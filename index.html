@@ -330,6 +330,46 @@
     }
     .add-stock-row input::placeholder { color: var(--text-muted); }
     .add-stock-row .btn { padding: 6px 10px; font-size: 0.8rem; }
+    .debug-panel {
+      position: fixed;
+      top: 60px;
+      right: 16px;
+      width: min(480px, calc(100vw - 32px));
+      max-height: calc(100vh - 80px);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+      z-index: 120;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .debug-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .debug-panel-title { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+    .debug-panel-actions { display: flex; gap: 6px; }
+    .debug-panel-actions .btn { padding: 6px 10px; font-size: 0.8rem; }
+    .debug-panel-body {
+      flex: 1;
+      overflow: auto;
+      padding: 10px;
+    }
+    .debug-panel-body pre {
+      margin: 0;
+      font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.75rem;
+      line-height: 1.45;
+      color: var(--text);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
     .menu-popover {
       position: fixed;
       background: var(--surface);
@@ -408,6 +448,7 @@
     <input type="file" id="importFileInput" accept=".json,application/json" style="display:none" />
     <button type="button" class="btn btn-primary" id="createRoot">創立產業</button>
     <button type="button" class="btn btn-primary" id="swapColorsBtn">交換漲跌顏色</button>
+    <button type="button" class="btn" id="debugWindowBtn" title="檢視漲跌幅請求與解析的除錯紀錄">Debug 視窗</button>
     <span class="toolbar-divider" aria-hidden="true"></span>
     <span class="second-range-wrap">
       <label for="secondRangeMode" class="second-range-label">第二段漲跌幅：</label>
@@ -447,6 +488,19 @@
         <button type="button" class="btn" id="modalCancel">取消</button>
         <button type="button" class="btn btn-primary" id="modalOk">確定</button>
       </div>
+    </div>
+  </div>
+  <div class="debug-panel" id="debugPanel" style="display:none">
+    <div class="debug-panel-header">
+      <span class="debug-panel-title">漲跌幅 Debug 紀錄</span>
+      <div class="debug-panel-actions">
+        <button type="button" class="btn" id="debugRefreshBtn">重新整理</button>
+        <button type="button" class="btn" id="debugClearBtn">清除</button>
+        <button type="button" class="btn" id="debugCloseBtn">關閉</button>
+      </div>
+    </div>
+    <div class="debug-panel-body">
+      <pre id="debugLogContent"></pre>
     </div>
   </div>
   <script src="app.js"></script>
